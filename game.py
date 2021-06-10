@@ -1,5 +1,5 @@
 import numpy as np
-
+import torch
 
 
 class Game:
@@ -19,7 +19,7 @@ class Game:
         self.playersVect = np.random.choice(range(num_players), size=board_size)
         self.players = np.unique(self.playersVect)
         self.board = np.random.choice(range(1, 10), size=board_size)
-        self.boardMat = np.diag(self.board)
+        self.boardMat = torch.tensor(np.diag(self.board))
         self.solution = self.solve()
 
     def solve(self):

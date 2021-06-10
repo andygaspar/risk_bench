@@ -7,25 +7,73 @@ import torch.nn.functional as F
 
 
 def set_xy(game: Game):
-    x = torch.tensor(game.boardMat)
     y = torch.zeros(game.boardSize)
     if game.solution.shape[0] == 1:
         y[game.solution] = 1
     else:
         val = 1 / game.solution.shape[0]
         y[game.solution] = val
-
-    return x, y
+    return y
 
 
 def get_inner_outer(game: Game, player: int):
-    inner = torch.tensor(game.boardMat[game.playersVect == player])
-    outer = torch.tensor(game.boardMat[game.playersVect != player])
+    inner = game.boardMat[game.playersVect == player]
+    outer = game.boardMat[game.playersVect != player]
     return inner, outer
+
+
+def get_player_mat(inner, outer, pVect, p):
+    return torch.stack((inner[pVect == p], outer[pVect != p]), dim=0)
 
 
 sMax = nn.Softmax(dim=1)
 
+
+class EmbedderNetwork(nn.Module):
+    def __init__(self, input_dim, nLayers, hidden_dim):
+        super().__init__()
+        layersList = [nn.Linear(input_dim, hidden_dim), nn.ReLU()]
+        for i in range(nLayers - 1):
+            layersList.append(nn.Linear(hidden_dim, hidden_dim))
+            layersList.append(nn.ReLU())
+
+        self._net = nn.Sequential(*layersList)
+
+    def forward(self, x):
+        return self._net(x)
+
+
+class AttentionGroupEmbedder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, ff_layers, n_heads=1):
+        super().__init__()
+        self._inputDim = input_dim
+        self._hiddenDim = hidden_dim
+        self._ffLayers = ff_layers
+        self._nHeads = n_heads
+
+        self._InnerFF = EmbedderNetwork(self._inputDim, self._ffLayers, self._hiddenDim)
+        self._OuterFF = EmbedderNetwork(self._inputDim, self._ffLayers, self._hiddenDim)
+        #self._KeyFF = EmbedderNetwork(self._inputDim, self._ffLayers, self._hiddenDim)
+        #self._QueryFF = EmbedderNetwork(self._inputDim, self._ffLayers, self._hiddenDim)
+        #self._ValueFF = EmbedderNetwork(self._inputDim, self._ffLayers, self._hiddenDim)
+
+        self._mha = torch.nn.MultiheadAttention(self._hiddenDim, self._nHeads)
+
+    def forward(self, gameMat, pVect, players):
+        inner = self._InnerFF(gameMat)
+        outer = self._OuterFF(gameMat)
+
+
+        pipipi = torch.tensor([get_player_mat(inner, outer, pVect, p) for p in players])
+        pMats = torch.stack([get_player_mat(inner, outer, pVect, p).unsqueeze() for p in players], dim=2)
+        print(pipipi == pMats)
+        pMats = torch.transpose(pMats, 1, 2)
+
+        #key = self._KeyFF(pMats)
+        #query = self._QueryFF(pMats)
+        #value = self._ValueFF(pMats)
+
+        return torch.mean(self._mha(pMats, pMats, pMats)[0], dim=0)
 
 class attentionNet(nn.Module):
     def __init__(self, hidden_dim, discretisation_size, n_airlines, n_trades, l_rate,
@@ -185,4 +233,3 @@ class attentionNet(nn.Module):
 
         # value_in = torch.cat((schedules_attention, trades_attention), dim=1).transpose(1, 2).squeeze(1).to(self.device)
         # value_in = torch.cat((value_in, current_trades_e), dim = 1).to(self.device)
-
